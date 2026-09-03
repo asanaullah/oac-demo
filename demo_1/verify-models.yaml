@@ -1,0 +1,80 @@
+# Assisted by Claude Opus
+# One-shot pod that mounts the `models` PVC read-only and prints metadata for
+# every model found under /models (any directory containing a config.json).
+# Verifies the downloaded models are visible/readable from within a pod.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-models
+  namespace: oac-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: verify-models
+      image: python:3.12-slim
+      command:
+        - python3
+        - -c
+        - |
+          import os, json, glob
+
+          root = "/models"
+          # A model dir is any directory that has a config.json.
+          configs = sorted(glob.glob(f"{root}/**/config.json", recursive=True))
+          if not configs:
+              print(f"No models found under {root}")
+              raise SystemExit(0)
+
+          def dir_size(path):
+              total = 0
+              for dp, _, files in os.walk(path):
+                  for f in files:
+                      fp = os.path.join(dp, f)
+                      if not os.path.islink(fp):
+                          total += os.path.getsize(fp)
+              return total
+
+          def human(n):
+              for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+                  if n < 1024:
+                      return f"{n:.1f} {unit}"
+                  n /= 1024
+              return f"{n:.1f} PiB"
+
+          print(f"Found {len(configs)} model(s) under {root}\n")
+          for cfg_path in configs:
+              d = os.path.dirname(cfg_path)
+              rel = os.path.relpath(d, root)
+              with open(cfg_path) as fh:
+                  cfg = json.load(fh)
+
+              # Multimodal configs (e.g. Gemma 4) nest the text-model dims under
+              # text_config; fall back to it when a key is missing at top level.
+              text = cfg.get("text_config", {})
+              def field(key):
+                  val = cfg.get(key)
+                  return text.get(key) if val is None else val
+
+              weights = [f for f in os.listdir(d)
+                         if f.endswith((".safetensors", ".bin"))]
+              print("=" * 72)
+              print(f"Model:        {rel}")
+              print(f"Path:         {d}")
+              print(f"On-disk size: {human(dir_size(d))}")
+              print(f"Architectures:{cfg.get('architectures')}")
+              print(f"model_type:   {cfg.get('model_type')}")
+              print(f"hidden_size:  {field('hidden_size')}")
+              print(f"num_layers:   {field('num_hidden_layers')}")
+              print(f"vocab_size:   {field('vocab_size')}")
+              print(f"torch_dtype:  {field('torch_dtype')}")
+              print(f"max_pos_emb:  {field('max_position_embeddings')}")
+              print(f"weight files: {len(weights)}")
+              print()
+      volumeMounts:
+        - name: models
+          mountPath: /models
+          readOnly: true
+  volumes:
+    - name: models
+      persistentVolumeClaim:
+        claimName: models

@@ -1,0 +1,59 @@
+# Assisted by Claude Opus
+# One-shot pod that downloads the demo models onto the `models` PVC at /models.
+# `hf download` skips files already present.
+#
+# Sizing note: the two models are ~68Gi on disk (gemma-4-31B ~62Gi,
+# Qwen2.5-3B ~6Gi), comfortably within the 100Gi `models` PVC.
+#
+# If a token is needed, load it from your host shell's $HF_TOKEN into a Secret,
+# then apply this manifest (the env ref below is optional, so it runs either way):
+#
+#   [ -n "$HF_TOKEN" ] && oc create secret generic hf-token \
+#     --from-literal=token="$HF_TOKEN" -n oac-demo \
+#     --dry-run=client -o yaml | oc apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-downloader
+  namespace: oac-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: model-downloader
+      image: python:3.12-slim
+      command:
+        - sh
+        - -c
+        - |
+          export HOME=/tmp
+          pip install --user huggingface_hub
+          export PATH=$HOME/.local/bin:$PATH
+          # Keep the HF/Xet chunk cache on the PVC to avoid filling the pod's
+          # ephemeral rootfs during large downloads.
+          export HF_HOME=/models/.hf-home
+
+          MODELS="
+            google/gemma-4-31B-it
+            Qwen/Qwen2.5-3B-Instruct
+          "
+
+          for model in $MODELS; do
+            echo "--- Downloading $model ---"
+            hf download "$model" --local-dir "/models/$model"
+          done
+
+          echo "=== All downloads complete ==="
+      # Uncomment to authenticate to HuggingFace (raises rate limits / gated repos):
+      # env:
+      #   - name: HF_TOKEN
+      #     valueFrom:
+      #       secretKeyRef:
+      #         name: hf-token
+      #         key: token
+      volumeMounts:
+        - name: models
+          mountPath: /models
+  volumes:
+    - name: models
+      persistentVolumeClaim:
+        claimName: models
