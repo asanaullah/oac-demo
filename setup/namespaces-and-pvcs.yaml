@@ -1,0 +1,105 @@
+# Assisted by Claude Opus 4.8
+# ---- Namespace ----
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oac-demo
+---
+# ---- PVCs ----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: results
+  namespace: oac-demo
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: pure-fb-nfsv4
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: models
+  namespace: oac-demo
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: pure-fb-nfsv4
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: datasets
+  namespace: oac-demo
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: pure-fb-nfsv4
+  resources:
+    requests:
+      storage: 100Gi
+---
+# ---- ServiceAccount ----
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oac-demo-sa
+  namespace: oac-demo
+---
+# ---- RBAC (project-level) ----
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oac-demo-user-role
+  namespace: oac-demo
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["jobset.x-k8s.io"]
+    resources: ["jobsets"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["kubeflow.org"]
+    resources: ["pytorchjobs", "tfjobs", "mpijobs", "xgboostjobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices", "servingruntimes"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["ray.io"]
+    resources: ["rayjobs", "rayclusters", "rayservices"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oac-demo-user-binding
+  namespace: oac-demo
+subjects:
+  - kind: User
+    name: asanaullah
+    apiGroup: rbac.authorization.k8s.io
+  - kind: ServiceAccount
+    name: oac-demo-sa
+    namespace: oac-demo
+roleRef:
+  kind: Role
+  name: oac-demo-user-role
+  apiGroup: rbac.authorization.k8s.io
