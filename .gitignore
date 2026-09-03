@@ -1,0 +1,6 @@
+# Claude Code / Claude-generated artifacts
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.claude.json
+.anthropic/
