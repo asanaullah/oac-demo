@@ -1,0 +1,64 @@
+# Assisted by Claude Opus
+# oac-demo overlay: customizes ../../base for this cluster. This is where the demo picks
+# WHICH model and WHICH adapters to serve:
+#   - namespace oac-demo
+#   - repoints storageUri at the `models` PVC subpath holding the Qwen2.5-3B-Instruct base
+#     weights (KServe mounts it read-only at /mnt/models; vLLM's --model=/mnt/models)
+#   - registers the two trained LoRA adapters as addressable model ids and mounts the
+#     `results` PVC they live on:
+#       * kubeflow -> demo_3's adapter  /mnt/results/kubeflow
+#       * kuberay  -> demo_4's adapter  /mnt/results/kuberay
+#
+# Setup:   oc apply -k demo_5/overlays/demo
+# Cleanup: oc delete -k demo_5/overlays/demo
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oac-demo
+
+resources:
+  - ../../base
+
+patches:
+  # Repoint the placeholder storageUri at the pre-staged base weights.
+  - target:
+      group: serving.kserve.io
+      version: v1beta1
+      kind: InferenceService
+      name: qwen
+    patch: |-
+      - op: replace
+        path: /spec/predictor/model/storageUri
+        value: pvc://models/Qwen/Qwen2.5-3B-Instruct
+  # Register the adapters and mount the results PVC that holds them.
+  # JSON6902 (not strategic merge): kustomize has no schema for the ServingRuntime CRD, so a
+  # merge patch would REPLACE the args/volume lists. These append ops preserve the base's
+  # existing flags/volumes. --lora-modules is appended last so its variadic name=path values
+  # aren't consumed by a following flag.
+  - target:
+      group: serving.kserve.io
+      version: v1alpha1
+      kind: ServingRuntime
+      name: qwen-vllm-runtime
+    patch: |-
+      - op: add
+        path: /spec/containers/0/args/-
+        value: "--lora-modules"
+      - op: add
+        path: /spec/containers/0/args/-
+        value: "kubeflow=/mnt/results/kubeflow"
+      - op: add
+        path: /spec/containers/0/args/-
+        value: "kuberay=/mnt/results/kuberay"
+      - op: add
+        path: /spec/containers/0/volumeMounts/-
+        value:
+          name: results
+          mountPath: /mnt/results
+          readOnly: true
+      - op: add
+        path: /spec/volumes/-
+        value:
+          name: results
+          persistentVolumeClaim:
+            claimName: results

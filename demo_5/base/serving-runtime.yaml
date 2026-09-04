@@ -1,0 +1,74 @@
+# Assisted by Claude Opus
+# Generic vLLM multi-LoRA ServingRuntime for Qwen2.5-3B-Instruct on a single H100.
+#
+# vLLM loads the base weights once (from the PVC at /mnt/models, mounted by the
+# InferenceService storageUri) and exposes it as the model id `qwen-base`
+# (--served-model-name). LoRA serving is ENABLED here (--enable-lora), but WHICH adapters
+# to load, and the PVC they live on, are environment-specific — the overlay supplies the
+# --lora-modules entries and mounts the results PVC. Both trained adapters are rank 16, so
+# --max-lora-rank=16 covers them.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: qwen-vllm-runtime
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    openshift.io/display-name: vLLM Qwen2.5 multi-LoRA ServingRuntime
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      # Qwen2.5 needs no special build (unlike demo_2's gemma4); a stock vllm-openai that
+      # supports Qwen2.5 + multi-LoRA is enough. Pinned for reproducibility.
+      image: docker.io/vllm/vllm-openai:v0.6.6
+      command:
+        - python3
+        - -m
+        - vllm.entrypoints.openai.api_server
+      args:
+        # Base weights, mounted read-only by KServe at /mnt/models.
+        - "--model=/mnt/models"
+        - "--served-model-name=qwen-base"
+        - "--max-model-len=8192"
+        - "--gpu-memory-utilization=0.90"
+        - "--port=8080"
+        # Enable LoRA serving. The specific adapters (--lora-modules name=path ...) are
+        # appended by the overlay and kept last, so their variadic name=path values aren't
+        # confused with other flags.
+        - "--enable-lora"
+        - "--max-lora-rank=16"
+        - "--max-loras=2"
+      env:
+        # OpenShift runs the pod as a random UID with HOME=/ (not writable). torch/vLLM
+        # write caches under ~/.cache, so point HOME at a writable emptyDir.
+        - name: HOME
+          value: "/home/vllm"
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          cpu: "8"
+          memory: 24Gi
+        limits:
+          nvidia.com/gpu: "1"      # single H100
+          memory: 48Gi
+      volumeMounts:
+        # vLLM wants a large /dev/shm even on one GPU.
+        - name: shm
+          mountPath: /dev/shm
+        - name: home
+          mountPath: /home/vllm
+        # The results PVC (adapters) is mounted by the overlay.
+  volumes:
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 8Gi
+    - name: home
+      emptyDir: {}

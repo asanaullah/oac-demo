@@ -1,0 +1,78 @@
+# Assisted by Claude Opus
+# One-shot pod that stages the demo datasets onto the `datasets` PVC at /mnt/datasets:
+#   1. tatsu-lab/alpaca    — the instruction-tuning dataset ost's fine-tune jobs
+#                            default to (used later by the Kubeflow/KubeRay demos).
+#   2. unsloth/LaTeX_OCR   — images of typeset mathematical expressions, for exercising
+#                            Gemma 4's vision path. A handful are exported as loose PNGs
+#                            under /mnt/datasets/images/ so a client can point the served
+#                            model at a concrete file (base64 it into the vLLM chat
+#                            `image_url`) and have it read/transcribe the math.
+#
+# `hf download` / the datasets cache skip files already present, so re-runs are cheap.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dataset-downloader
+  namespace: oac-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: dataset-downloader
+      image: python:3.12-slim
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          export HOME=/tmp
+          pip install --user huggingface_hub datasets pillow
+          export PATH=$HOME/.local/bin:$PATH
+          # Keep the HF/datasets cache on the PVC, not the pod's ephemeral rootfs.
+          export HF_HOME=/mnt/datasets/.hf-home
+
+          echo "--- Downloading fine-tuning dataset: tatsu-lab/alpaca ---"
+          hf download tatsu-lab/alpaca --repo-type dataset \
+            --local-dir /mnt/datasets/tatsu-lab/alpaca
+
+          echo "--- Downloading image dataset: unsloth/LaTeX_OCR ---"
+          hf download unsloth/LaTeX_OCR --repo-type dataset \
+            --local-dir /mnt/datasets/unsloth/LaTeX_OCR
+
+          echo "--- Exporting sample math images to /mnt/datasets/images ---"
+          python3 - <<'PY'
+          import os, io, glob
+          from datasets import load_dataset
+          from PIL import Image as PILImage
+
+          out = "/mnt/datasets/images"
+          os.makedirs(out, exist_ok=True)
+          # Load from the parquet we just pulled (no second trip to the hub).
+          files = sorted(glob.glob("/mnt/datasets/unsloth/LaTeX_OCR/**/*.parquet",
+                                   recursive=True))
+          ds = load_dataset("parquet", data_files=files, split="train")
+
+          # Find the image column from the schema (fall back to "image").
+          img_col = next((c for c, f in ds.features.items()
+                          if f.__class__.__name__ == "Image"), "image")
+
+          def to_pil(v):
+              if hasattr(v, "convert"):          # already a PIL image
+                  return v
+              if isinstance(v, dict) and v.get("bytes"):
+                  return PILImage.open(io.BytesIO(v["bytes"]))
+              raise ValueError("unrecognized image value")
+
+          for i in range(5):
+              path = os.path.join(out, f"math_{i}.png")
+              to_pil(ds[i][img_col]).convert("RGB").save(path, "PNG")
+              print("saved", path)
+          PY
+
+          echo "=== All dataset downloads complete ==="
+      volumeMounts:
+        - name: datasets
+          mountPath: /mnt/datasets
+  volumes:
+    - name: datasets
+      persistentVolumeClaim:
+        claimName: datasets

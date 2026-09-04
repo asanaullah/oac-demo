@@ -1,0 +1,32 @@
+# Assisted by Claude Opus
+# KServe InferenceService serving Gemma 4 with vLLM.
+# RawDeployment (no Knative dependency): KServe reconciles a plain Deployment +
+# Service + HPA for the predictor. Weights are served straight from a PVC —
+# storageUri pvc://<claim>/<path> makes KServe mount that subpath read-only at
+# /mnt/models (no S3, no per-pod HuggingFace download). The storageUri below is a
+# placeholder; each overlay repoints it at the PVC/subpath that holds the weights.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: gemma4
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    openshift.io/display-name: gemma4
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: gemma4-vllm-runtime
+      # Placeholder — overridden per environment by the overlay.
+      storageUri: pvc://REPLACE-ME/model
+    # GPU nodes are tainted nvidia.com/gpu.product=<PRODUCT>:NoSchedule; tolerate the
+    # key regardless of value so the predictor can schedule onto them.
+    tolerations:
+      - key: nvidia.com/gpu.product
+        operator: Exists
+        effect: NoSchedule

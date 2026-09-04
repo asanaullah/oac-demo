@@ -1,0 +1,50 @@
+# Assisted by Claude Opus
+# Demo overlay: pins the job to the oac-demo namespace, supplies the training script (as a
+# ConfigMap generated from fine-tune.py), and selects — via env vars — which script the
+# mounted ConfigMap runs (SCRIPT_NAME) and which dataset to train on (DATASET_PATH, staged
+# on the datasets PVC by demo_1). Everything else (model path, output dir, hyper-parameters,
+# GPU count) comes from the base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oac-demo
+
+resources:
+  - ../../base
+
+# Mount the training script from a ConfigMap generated straight from the .py file, so the
+# code lives as a real, lint-able Python file rather than an inline YAML blob and no image
+# build/push is needed.
+#
+# NOTE: a ConfigMap can hold at most ~1MiB. fine-tune.py is a few KB, so it fits easily.
+# If a script (or its assets) ever grows past ~1MiB you cannot ship it in one ConfigMap —
+# either split it across multiple ConfigMaps (mount them at the same dir / import between
+# them) or bake the script into a custom container image instead of mounting it.
+configMapGenerator:
+  - name: qwen-sft-script
+    files:
+      - entrypoint.sh
+      - fine-tune.py
+
+generatorOptions:
+  # Keep a stable ConfigMap name (no content-hash suffix): the PyTorchJob is a CRD, so
+  # kustomize's name-reference rewriting doesn't reach the volume's configMap.name.
+  disableNameSuffixHash: true
+
+patches:
+  - target:
+      group: kubeflow.org
+      version: v1
+      kind: PyTorchJob
+      name: qwen-sft
+    patch: |
+      - op: add
+        path: /spec/pytorchReplicaSpecs/Master/template/spec/containers/0/env/-
+        value:
+          name: SCRIPT_NAME
+          value: fine-tune.py
+      - op: add
+        path: /spec/pytorchReplicaSpecs/Master/template/spec/containers/0/env/-
+        value:
+          name: DATASET_PATH
+          value: /mnt/datasets/tatsu-lab/alpaca

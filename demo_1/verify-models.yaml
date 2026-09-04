@@ -1,6 +1,6 @@
 # Assisted by Claude Opus
 # One-shot pod that mounts the `models` PVC read-only and prints metadata for
-# every model found under /models (any directory containing a config.json).
+# every model found under /mnt/models (any directory containing a config.json).
 # Verifies the downloaded models are visible/readable from within a pod.
 apiVersion: v1
 kind: Pod
@@ -18,7 +18,7 @@ spec:
         - |
           import os, json, glob
 
-          root = "/models"
+          root = "/mnt/models"
           # A model dir is any directory that has a config.json.
           configs = sorted(glob.glob(f"{root}/**/config.json", recursive=True))
           if not configs:
@@ -72,7 +72,7 @@ spec:
               print()
       volumeMounts:
         - name: models
-          mountPath: /models
+          mountPath: /mnt/models
           readOnly: true
   volumes:
     - name: models

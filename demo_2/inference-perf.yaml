@@ -1,0 +1,114 @@
+# Assisted by Claude Opus
+# In-cluster load test of the running Gemma 4 endpoint with inference-perf
+# (https://github.com/kubernetes-sigs/inference-perf). Runs in a SEPARATE pod from
+# the serving pod, so the numbers reflect real client -> server behavior over the
+# cluster network.
+#
+# Target: the predictor Service that KServe creates for the InferenceService,
+# http://gemma4-predictor.oac-demo.svc.cluster.local:8080. That Service is headless
+# (clusterIP: None), so DNS resolves straight to the predictor pod and there is no
+# port remapping — dial vLLM's real container port 8080, not the Service's port 80.
+# No hand-rolled Service or Route is needed. Confirm the pod port with:
+#   oc get endpoints gemma4-predictor -n oac-demo
+#
+#   Run:     oc apply -f demo_2/inference-perf.yaml
+#   Watch:   oc logs -f job/gemma4-inference-perf -n oac-demo
+#   Cleanup: oc delete -f demo_2/inference-perf.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gemma4-inference-perf-config
+  namespace: oac-demo
+  labels: { app: gemma4-inference-perf }
+data:
+  config.yml: |
+    # Constant-rate load: 8 requests/sec for 10s.
+    load:
+      type: constant
+      stages:
+        - rate: 8
+          duration: 10
+    api:
+      # inference-perf's `random` datagen supports the completion API only (its
+      # get_supported_apis() returns [Completion]); `chat` raises "Unsupported API
+      # type". vLLM serves /v1/completions for the instruct model just fine.
+      type: completion
+      streaming: true       # needed for TTFT / inter-token-latency metrics
+    server:
+      type: vllm
+      model_name: gemma-4                                            # the server's --served-model-name
+      base_url: http://gemma4-predictor.oac-demo.svc.cluster.local:8080  # headless Service -> vLLM container port
+      ignore_eos: true      # generate the full output length for stable numbers
+    tokenizer:
+      # Real HF repo id — inference-perf tokenizes to build synthetic prompts of a
+      # target length (the served name 'gemma-4' is not an HF id). Model is public.
+      pretrained_model_name_or_path: google/gemma-4-31B-it
+    data:
+      type: random          # synthetic prompts (no external dataset download)
+      input_distribution:   # fixed-length prompts: min=max=mean, std_dev=0
+        min: 256
+        max: 256
+        mean: 256
+        std_dev: 0
+        total_count: 100
+      output_distribution:
+        min: 128
+        max: 128
+        mean: 128
+        std_dev: 0
+        total_count: 100
+    metrics:
+      type: default         # client-side only — avoids the Prometheus dependency
+    report:
+      request_lifecycle:
+        summary: true       # the summary table printed to the log
+        per_stage: true
+        per_request: false
+    storage:
+      local_storage:
+        # Reports must go somewhere writable (random UID, HOME=/).
+        path: /tmp/reports-{timestamp}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gemma4-inference-perf
+  namespace: oac-demo
+  labels: { app: gemma4-inference-perf }
+spec:
+  backoffLimit: 0            # a benchmark either runs or it doesn't; don't retry
+  template:
+    metadata:
+      labels: { app: gemma4-inference-perf }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: inference-perf
+          # :latest is required for Gemma 4 — its transformers is new enough to load
+          # the gemma-4 tokenizer (v0.6.1's is too old: 'list' object has no attribute 'keys').
+          image: quay.io/inference-perf/inference-perf:latest
+          command: ["inference-perf", "--config_file", "/etc/config/config.yml"]
+          env:
+            # OpenShift random UID with HOME=/ (not writable) — give the tokenizer
+            # download + HF caches a writable home (same reason as the serving pod).
+            - name: HOME
+              value: "/tmp"
+            - name: HF_HOME
+              value: "/tmp/hf"
+            - name: HF_HUB_ENABLE_HF_TRANSFER
+              value: "0"
+            # inference-perf reads HF_TOKEN (optional; the model is public/ungated).
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef: { name: hf-token, key: token, optional: true }
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config
+              readOnly: true
+          resources:
+            requests: { cpu: "2", memory: 4Gi }
+            limits:   { cpu: "4", memory: 8Gi }
+      volumes:
+        - name: config
+          configMap:
+            name: gemma4-inference-perf-config

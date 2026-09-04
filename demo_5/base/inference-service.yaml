@@ -1,0 +1,32 @@
+# Assisted by Claude Opus
+# KServe InferenceService serving Qwen2.5-3B-Instruct with vLLM (single H100).
+# RawDeployment (no Knative): KServe reconciles a plain Deployment + Service for the
+# predictor. The base weights are served straight from the PVC — storageUri
+# pvc://<claim>/<path> makes KServe mount that subpath read-only at /mnt/models. The LoRA
+# adapters are NOT wired here; the ServingRuntime loads them from the results PVC it mounts.
+# The storageUri below is a placeholder; the overlay repoints it at the real weights.
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: qwen
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    openshift.io/display-name: qwen
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: qwen-vllm-runtime
+      # Placeholder — overridden per environment by the overlay.
+      storageUri: pvc://REPLACE-ME/model
+    # GPU nodes are tainted nvidia.com/gpu.product=<PRODUCT>:NoSchedule; tolerate the
+    # key regardless of value so the predictor can schedule onto them.
+    tolerations:
+      - key: nvidia.com/gpu.product
+        operator: Exists
+        effect: NoSchedule

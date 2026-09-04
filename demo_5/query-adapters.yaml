@@ -1,0 +1,73 @@
+# Assisted by Claude Opus
+# One-shot pod that exercises the multi-LoRA endpoint from inside the cluster (no
+# port-forward needed). It sends the SAME prompt to all three model ids the runtime
+# serves and prints each reply, so the base model and the two fine-tuned adapters can be
+# compared side by side:
+#   * qwen-base -> the untuned base model
+#   * kubeflow  -> demo_3's LoRA adapter
+#   * kuberay   -> demo_4's LoRA adapter
+#
+# Prereqs: demo_5 serving is up (inferenceservice qwen Ready).
+# Uses only the Python stdlib (no pip install).
+#
+#   Run:     oc apply -f demo_5/query-adapters.yaml
+#   Output:  oc logs -f pod/query-adapters -n oac-demo
+#   Cleanup: oc delete -f demo_5/query-adapters.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: query-adapters
+  namespace: oac-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: query-adapters
+      image: python:3.12-slim
+      env:
+        # The predictor's in-cluster Service (same host:port the isvc URL resolves to).
+        - name: ENDPOINT
+          value: http://qwen-predictor.oac-demo.svc.cluster.local:8080
+        - name: PROMPT
+          value: "Give three tips for staying healthy."
+      command:
+        - python3
+        - -c
+        - |
+          import os, json, urllib.request
+
+          base = os.environ["ENDPOINT"]
+          prompt = os.environ["PROMPT"]
+          models = ["qwen-base", "kubeflow", "kuberay"]
+
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=30) as r:
+                  return json.load(r)
+
+          def chat(model):
+              payload = {
+                  "model": model,
+                  "messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": 256,
+                  "temperature": 0.2,
+              }
+              req = urllib.request.Request(
+                  base + "/v1/chat/completions",
+                  data=json.dumps(payload).encode(),
+                  headers={"Content-Type": "application/json"},
+              )
+              with urllib.request.urlopen(req, timeout=120) as r:
+                  return json.load(r)["choices"][0]["message"]["content"].strip()
+
+          print(f"Endpoint: {base}")
+          served = [m["id"] for m in get("/v1/models")["data"]]
+          print("Registered models:", ", ".join(served))
+          print(f"\nPrompt (sent to all three): {prompt}")
+
+          for m in models:
+              print("\n" + "=" * 72)
+              print(f"model = {m}")
+              print("-" * 72)
+              try:
+                  print(chat(m))
+              except Exception as e:
+                  print(f"[error querying {m}] {e}")

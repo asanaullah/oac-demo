@@ -1,0 +1,9 @@
+# Assisted by Claude Opus
+# Generic base: just the PyTorchJob. The overlay supplies the training script (as a
+# generated ConfigMap named qwen-sft-script, which this job mounts at /scripts) and the
+# script/dataset env vars.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - pytorch-job.yaml

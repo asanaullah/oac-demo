@@ -1,0 +1,66 @@
+# Assisted by Claude Opus
+# vLLM ServingRuntime for serving Gemma 4 from a PVC.
+# The gemma4 architecture needs a recent vLLM (transformers >= 5.5.0); the stock
+# RHOAI vLLM image predates it and fails with "model type 'gemma4' not
+# recognized", so we use the upstream vllm-openai image. Weights are served from
+# /mnt/models, mounted read-only from the PVC by the InferenceService storageUri.
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: gemma4-vllm-runtime
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    openshift.io/display-name: vLLM Gemma 4 ServingRuntime
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: docker.io/vllm/vllm-openai:gemma4
+      # The vllm-openai image ships python3 (no `python` symlink).
+      command:
+        - python3
+        - -m
+        - vllm.entrypoints.openai.api_server
+      args:
+        # Weights are on the PVC, mounted by KServe at /mnt/models.
+        - "--model=/mnt/models"
+        - "--served-model-name=gemma-4"
+        - "--tensor-parallel-size=2"
+        - "--max-model-len=8192"
+        - "--gpu-memory-utilization=0.90"
+        - "--port=8080"
+      env:
+        # OpenShift runs the pod as a random UID with HOME=/ (not writable).
+        # torch/flashinfer write caches under ~/.cache, so point HOME at a
+        # writable emptyDir (weights are already on /mnt/models — no download).
+        - name: HOME
+          value: "/home/vllm"
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+      resources:
+        requests:
+          cpu: "8"
+          memory: 48Gi
+        limits:
+          nvidia.com/gpu: "2"      # tensor-parallel size (2xH100)
+          memory: 96Gi
+      volumeMounts:
+        # vLLM needs a large /dev/shm for NCCL when TP > 1.
+        - name: shm
+          mountPath: /dev/shm
+        # Writable HOME for torch/flashinfer caches (see HOME env above).
+        - name: home
+          mountPath: /home/vllm
+  volumes:
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Gi
+    - name: home
+      emptyDir: {}

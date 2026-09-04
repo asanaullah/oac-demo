@@ -1,0 +1,38 @@
+# Assisted by Claude Opus
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: oac-demo
+
+resources:
+  - ../../base
+
+# The driver script is mounted from this ConfigMap at /home/ray/scripts. disableNameSuffixHash
+# is required: RayJob is a CRD, so kustomize's name-reference rewriting won't reach the
+# volume's configMap.name in ray-job.yaml — the name must stay stable (qwen-sft-ray-script).
+configMapGenerator:
+  - name: qwen-sft-ray-script
+    files:
+      - fine-tune.py
+generatorOptions:
+  disableNameSuffixHash: true
+
+# The overlay supplies the dataset location via env (mirrors demo_3). It's added to the
+# worker container (where train_func runs and inherits the pod env) and the head container
+# (harmless, keeps the two in sync).
+patches:
+  - target:
+      group: ray.io
+      version: v1
+      kind: RayJob
+      name: qwen-sft-ray
+    patch: |
+      - op: add
+        path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/containers/0/env/-
+        value:
+          name: DATASET_PATH
+          value: /mnt/datasets/tatsu-lab/alpaca
+      - op: add
+        path: /spec/rayClusterSpec/headGroupSpec/template/spec/containers/0/env/-
+        value:
+          name: DATASET_PATH
+          value: /mnt/datasets/tatsu-lab/alpaca

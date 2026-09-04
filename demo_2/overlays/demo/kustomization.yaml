@@ -1,0 +1,49 @@
+# Assisted by Claude Opus
+# oac-demo overlay: customizes ../../base for this cluster.
+#   - namespace oac-demo
+#   - repoints storageUri at the `models` PVC subpath holding the Gemma 4 weights
+#     (KServe mounts it read-only at /mnt/models; vLLM's default --model=/mnt/models)
+#   - mounts the `results` PVC at /oac-workspace
+#
+# Setup:   oc apply -k demo_2/overlays/demo
+# Cleanup: oc delete -k demo_2/overlays/demo
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oac-demo
+
+resources:
+  - ../../base
+
+patches:
+  # Repoint the placeholder storageUri at the pre-staged weights.
+  - target:
+      group: serving.kserve.io
+      version: v1beta1
+      kind: InferenceService
+      name: gemma4
+    patch: |-
+      - op: replace
+        path: /spec/predictor/model/storageUri
+        value: pvc://models/google/gemma-4-31B-it
+  # Add the results PVC at /oac-workspace.
+  # JSON6902 (not strategic merge): kustomize has no schema for the ServingRuntime
+  # CRD, so a merge patch would REPLACE the volume lists (losing shm/home). These
+  # append ops preserve the base's existing volumes/mounts.
+  - target:
+      group: serving.kserve.io
+      version: v1alpha1
+      kind: ServingRuntime
+      name: gemma4-vllm-runtime
+    patch: |-
+      - op: add
+        path: /spec/containers/0/volumeMounts/-
+        value:
+          name: results
+          mountPath: /oac-workspace
+      - op: add
+        path: /spec/volumes/-
+        value:
+          name: results
+          persistentVolumeClaim:
+            claimName: results

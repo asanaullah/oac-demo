@@ -1,0 +1,80 @@
+# Assisted by Claude Opus
+# One-shot pod that exercises Gemma 4's vision path: it base64-encodes an image
+# staged on the `datasets` PVC and POSTs it to the served model's OpenAI-compatible
+# /v1/chat/completions endpoint, then prints the model's description.
+#
+# Prereqs:
+#   - demo_2 serving is up (inferenceservice gemma4 Ready)
+#   - demo_1's dataset-downloader has populated /mnt/datasets/images/
+# Uses only the Python stdlib (no pip install).
+#
+#   Run:     oc apply -f demo_2/image-query.yaml
+#   Output:  oc logs -f pod/image-query -n oac-demo
+#   Cleanup: oc delete -f demo_2/image-query.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: image-query
+  namespace: oac-demo
+spec:
+  restartPolicy: Never
+  containers:
+    - name: image-query
+      image: python:3.12-slim
+      env:
+        # Same headless predictor Service + container port the load test uses.
+        - name: ENDPOINT
+          value: http://gemma4-predictor.oac-demo.svc.cluster.local:8080/v1/chat/completions
+        - name: MODEL
+          value: gemma-4
+        - name: IMAGE_PATH
+          value: /mnt/datasets/images/math_0.png
+        - name: PROMPT
+          value: "Transcribe the mathematical expression in this image as LaTeX, then briefly explain what it represents."
+      command:
+        - python3
+        - -c
+        - |
+          import os, json, base64, mimetypes, urllib.request
+
+          endpoint = os.environ["ENDPOINT"]
+          model = os.environ["MODEL"]
+          image_path = os.environ["IMAGE_PATH"]
+          prompt = os.environ["PROMPT"]
+
+          # Inline the image as a data: URI (what the OpenAI vision API expects).
+          mime = mimetypes.guess_type(image_path)[0] or "image/jpeg"
+          with open(image_path, "rb") as fh:
+              data_uri = f"data:{mime};base64," + base64.b64encode(fh.read()).decode()
+
+          payload = {
+              "model": model,
+              "messages": [
+                  {"role": "user", "content": [
+                      {"type": "text", "text": prompt},
+                      {"type": "image_url", "image_url": {"url": data_uri}},
+                  ]},
+              ],
+              "max_tokens": 256,
+              "temperature": 0.2,
+          }
+          req = urllib.request.Request(
+              endpoint,
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          print(f"POST {endpoint}")
+          print(f"  model={model}  image={image_path}")
+          print(f"  prompt={prompt}\n")
+          with urllib.request.urlopen(req, timeout=120) as resp:
+              body = json.load(resp)
+          print("=== Gemma 4 response ===")
+          print(body["choices"][0]["message"]["content"])
+      volumeMounts:
+        - name: datasets
+          mountPath: /mnt/datasets
+          readOnly: true
+  volumes:
+    - name: datasets
+      persistentVolumeClaim:
+        claimName: datasets

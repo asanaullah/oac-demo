@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Assisted by Claude Opus
-# Deletes the demo_1 pods (model-downloader, verify-models).
+# Deletes the demo_1 pods (model-downloader, verify-models, dataset-downloader).
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-oac-demo}"
 
-for pod in model-downloader verify-models; do
+for pod in model-downloader verify-models dataset-downloader; do
   echo "--- Deleting pod/$pod ---"
   oc delete pod "$pod" -n "$NAMESPACE" --ignore-not-found
 done

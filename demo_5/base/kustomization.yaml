@@ -1,0 +1,10 @@
+# Assisted by Claude Opus
+# Base kustomization: aggregates the two Qwen serving manifests
+# (ServingRuntime + InferenceService). Sets no namespace and applies no patches;
+# overlays layer those on.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - serving-runtime.yaml
+  - inference-service.yaml

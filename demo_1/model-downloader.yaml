@@ -1,5 +1,5 @@
 # Assisted by Claude Opus
-# One-shot pod that downloads the demo models onto the `models` PVC at /models.
+# One-shot pod that downloads the demo models onto the `models` PVC at /mnt/models.
 # `hf download` skips files already present.
 #
 # Sizing note: the two models are ~68Gi on disk (gemma-4-31B ~62Gi,
@@ -30,7 +30,7 @@ spec:
           export PATH=$HOME/.local/bin:$PATH
           # Keep the HF/Xet chunk cache on the PVC to avoid filling the pod's
           # ephemeral rootfs during large downloads.
-          export HF_HOME=/models/.hf-home
+          export HF_HOME=/mnt/models/.hf-home
 
           MODELS="
             google/gemma-4-31B-it
@@ -39,7 +39,7 @@ spec:
 
           for model in $MODELS; do
             echo "--- Downloading $model ---"
-            hf download "$model" --local-dir "/models/$model"
+            hf download "$model" --local-dir "/mnt/models/$model"
           done
 
           echo "=== All downloads complete ==="
@@ -52,7 +52,7 @@ spec:
       #         key: token
       volumeMounts:
         - name: models
-          mountPath: /models
+          mountPath: /mnt/models
   volumes:
     - name: models
       persistentVolumeClaim:

@@ -1,0 +1,48 @@
+# Assisted by Claude Opus
+# One-shot pod that inspects the LoRA adapter the Ray Train job (demo_4) wrote to the
+# `results` PVC under /mnt/results/kuberay: it lists the output dir, prints
+# adapter_config.json (r / alpha / target modules / base model), and shows the adapter
+# weight size. Read-only mount, no training deps — just needs to see the files.
+#
+# Prereq: the qwen-sft-ray RayJob has completed and written to /mnt/results/kuberay.
+#
+#   Run:     oc apply -f demo_4/inspect-adapter.yaml
+#   Output:  oc logs -f pod/adapter-inspect-ray -n oac-demo
+#   Cleanup: oc delete -f demo_4/inspect-adapter.yaml   (or demo_4/cleanup.sh)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: adapter-inspect-ray
+  namespace: oac-demo
+  labels:
+    app: qwen-sft-ray
+spec:
+  restartPolicy: Never
+  containers:
+    - name: adapter-inspect
+      image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+      env:
+        # Same location the job's OUTPUT_DIR points at.
+        - name: ADAPTER_DIR
+          value: /mnt/results/kuberay
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "=== ls $ADAPTER_DIR ==="
+          ls -la "$ADAPTER_DIR"
+          echo
+          echo "=== adapter_config.json ==="
+          cat "$ADAPTER_DIR/adapter_config.json"
+          echo
+          echo "=== adapter weight ==="
+          ls -la "$ADAPTER_DIR"/adapter_model.safetensors
+      volumeMounts:
+        - name: results
+          mountPath: /mnt/results
+          readOnly: true
+  volumes:
+    - name: results
+      persistentVolumeClaim:
+        claimName: results
