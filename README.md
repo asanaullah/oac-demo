@@ -80,3 +80,14 @@ The runners do **not** tear anything down, so serving and training workloads sta
 ./demo_5/run.sh
 ./demo_5/cleanup.sh   # deletes the endpoint (frees the GPU)
 ```
+
+## Demo 6: Agent onboarding w/ Rossoctl (A2A)
+
+- Onboard a minimal A2A agent to the Rossoctl operator from the CLI alone (no UI, no GPUs).
+- Deploy the agent (a tiny server that serves its A2A card and answers `message/send`), then apply an AgentRuntime + AuthorizationPolicy; the operator auto-creates, fetches, and indexes the AgentCard hands-off.
+- Send the agent a live A2A request from a separate pod and confirm it acknowledges the call, proven by the JSON-RPC ack and the agent's own log.
+
+```sh
+./demo_6/run.sh
+./demo_6/cleanup.sh   # removes the agent + Rossoctl CRs (namespace is left in place)
+```

@@ -1,0 +1,37 @@
+# demo_6 Rossoctl control objects.
+#
+# We apply only AgentRuntime + AuthorizationPolicy. We do NOT hand-author an
+# AgentCard: once the operator labels the workload and sees the A2A protocol
+# label, its sync controller auto-creates the AgentCard, fetches the live card
+# from the Service, and indexes it (a webhook rejects a duplicate card).
+---
+apiVersion: agent.rossoctl.dev/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: weather-agent-runtime
+spec:
+  type: agent
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: weather-agent
+  # Least-dep modes: no SPIRE/Keycloak required to reconcile the CR itself.
+  authBridgeMode: lite
+  mtlsMode: disabled
+  egressEnforcement: none
+  tlsBridgeMode: disabled
+---
+apiVersion: agent.rossoctl.dev/v1alpha1
+kind: AuthorizationPolicy
+metadata:
+  name: weather-agent-authz
+spec:
+  scope: namespace
+  policies:
+    # path is a .rego filename; content is the Rego policy body.
+    - path: authz.rego
+      content: |
+        package rossoctl.authz
+        default allow := false
+        # Demo policy: allow calls exercising the get-weather skill.
+        allow if input.skill == "get-weather"

@@ -1,0 +1,47 @@
+# demo_6 exercise step: an in-cluster client that sends a live A2A JSON-RPC
+# message/send to the onboarded agent's Service and asserts the ack.
+#
+# This is the data-plane proof (mirrors how the other demos exercise their
+# workload from a separate pod): the agent must RECEIVE the request and return a
+# JSON-RPC result with a completed Task. The pod exits non-zero if no ack comes
+# back, so the runner's "Succeeded" check doubles as the assertion.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: a2a-request
+  labels:
+    app: a2a-request
+spec:
+  restartPolicy: Never
+  containers:
+    - name: client
+      image: registry.access.redhat.com/ubi9/python-311:latest
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          python3 - <<'PY'
+          import json, sys, urllib.request
+          url = "http://weather-agent:8080/"
+          req = {
+              "jsonrpc": "2.0", "id": "demo-1", "method": "message/send",
+              "params": {"message": {
+                  "role": "user", "messageId": "m-1",
+                  "parts": [{"kind": "text", "text": "weather in Paris?"}],
+              }},
+          }
+          body = json.dumps(req).encode()
+          print("--- request (A2A message/send) ---")
+          print(json.dumps(req))
+          r = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": "application/json"})
+          resp = urllib.request.urlopen(r, timeout=15).read().decode()
+          print("--- response ---")
+          print(resp)
+          data = json.loads(resp)
+          task = data.get("result", {})
+          if task.get("status", {}).get("state") == "completed":
+              print("OK: agent RECEIVED the A2A request and returned a JSON-RPC ack (task completed)")
+              sys.exit(0)
+          print("FAIL: no completed-task ack in the response")
+          sys.exit(1)
+          PY
