@@ -91,3 +91,15 @@ The runners do **not** tear anything down, so serving and training workloads sta
 ./demo_6/run.sh
 ./demo_6/cleanup.sh   # removes the agent + Rossoctl CRs (namespace is left in place)
 ```
+
+## Demo 7: Sandbox egress deny w/ OpenShell (A2A agent)
+
+- Prove that NVIDIA OpenShell — not a raw Kubernetes NetworkPolicy — denies a sandboxed Claude Code agent's egress (no GPUs). Enforcement is an inline L7 policy proxy (OPA/regorus), fail-closed.
+- Attach a per-binary allowlist policy (allow `api.anthropic.com` for `claude` and a contrast host for `curl`; `github.com` deliberately omitted), then create a sandbox with that policy via the `openshell` CLI.
+- From inside the sandbox, `curl` the allowed host (ALLOWED) and `github.com` (DENIED, 403 from the proxy), confirmed by the sandbox's OPA enforcement log.
+- Assumes the OpenShell gateway + agent-sandbox CRDs are already deployed by an admin; the runner only verifies they are present.
+
+```sh
+./demo_7/run.sh
+./demo_7/cleanup.sh   # deletes the sandbox (gateway + CRDs left in place)
+```
