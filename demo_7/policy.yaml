@@ -1,0 +1,27 @@
+# Assisted by Claude Opus 4.8
+# OpenShell sandbox network policy: per-binary allowlist, fail-closed.
+# Only listed binaries may reach listed endpoints; github.com is deliberately
+# ABSENT, so it is denied by default. run.sh substitutes __ALLOW_HOST__ (the
+# contrast host allowed for curl) before attaching this to the sandbox.
+version: 1
+network_policies:
+  anthropic_api:
+    name: anthropic_api
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - path: /usr/local/bin/claude
+  contrast_allow:
+    name: contrast_allow
+    endpoints:
+      - host: __ALLOW_HOST__
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - path: /usr/bin/curl
